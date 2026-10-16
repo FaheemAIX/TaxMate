@@ -4,17 +4,10 @@ schemas/chat.py is like the Resturant's Menu: It defines exactly what the custom
 
 from pydantic import BaseModel, Field
 
-
 class ChatRequest(BaseModel):
-    query: str = Field(..., min_length=3, description="User's tax-related question in plain language")
-
-
-class SourceChunk(BaseModel):
-    content: str
-    source: str
-
+    session_id: str = Field(..., description="Unique ID for the conversation session")
+    query: str = Field(..., min_length=3, description="User question about FBR tax laws")
 
 class ChatResponse(BaseModel):
     answer: str
-    calculation: dict | None = None
-    sources: list[SourceChunk] = []
+    sources: list[str] = Field(default_factory=list)
