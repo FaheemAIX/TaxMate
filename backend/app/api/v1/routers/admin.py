@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from app.services.ingestion_service import sync_documents
 from app.db.vector_store import get_indexed_state
+from app.services.ingestion_service import sync_documents
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 

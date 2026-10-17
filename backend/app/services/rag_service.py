@@ -22,8 +22,8 @@ TAX_FUNCTION_MAP = {
 
 INTENT_SYSTEM_PROMPT = """You are an intent classifier for a Pakistani tax assistant.
 Given a user's question (and optional recent conversation history), determine:
-1. intent_type: "calculation" (needs exact tax math), "conceptual" (needs explanation of rules), or "both"
-2. If income is mentioned or derived from context, convert it to annual_income in PKR (e.g. "250,000 a month" = 3000000 annual, "2.5 million" = 2500000)
+1. intent_type: MUST be exactly "calculation" (needs tax math), "conceptual" (rules, explanations, greetings, or general chat), or "both". NEVER return null.
+2. If income is mentioned or derived from context, convert it to annual_income in PKR (e.g. "250,000 a month" = 3000000 annual).
 3. person_type: "salaried" if they mention salary/employer, "aop" if self-employed/business, "property_rental" if about rental income. null if unclear or not applicable.
 
 Respond ONLY with valid JSON matching this exact shape, no other text:
@@ -88,7 +88,18 @@ def detect_intent(query: str, history: list[tuple[str, str]] | None = None) -> Q
     response = get_llm().invoke(messages)
     raw = response.content.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    return QueryIntent(**json.loads(raw))
+    
+    try:
+        return QueryIntent(**json.loads(raw))
+    except Exception as e:
+        print(f"Intent validation failed: {e}. Falling back to default chat.")
+        # Safe fallback for greetings or misformatted LLM responses
+        return QueryIntent(
+            intent_type="conceptual", 
+            annual_income=None, 
+            person_type=None, 
+            reasoning="Fallback due to parsing error"
+        )
 
 
 def _tokenize(text: str) -> list[str]:
