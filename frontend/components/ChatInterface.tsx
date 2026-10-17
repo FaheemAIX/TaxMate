@@ -50,57 +50,104 @@ export default function ChatInterface() {
     const userMessage = input;
     setInput("");
 
-    // If this session isn't in the sidebar yet, add it now using the message as the title
-    const isNewSession = !sessions.some(s => s.id === activeSessionId);
+    const isNewSession = !sessions.some((s) => s.id === activeSessionId);
     if (isNewSession) {
       setSessions((prev) => [
-        { 
-          id: activeSessionId, 
-          title: userMessage.slice(0, 30) + (userMessage.length > 30 ? "..." : "") 
+        {
+          id: activeSessionId,
+          title: userMessage.slice(0, 30) + (userMessage.length > 30 ? "..." : ""),
         },
-        ...prev
+        ...prev,
       ]);
     }
-    
-    // Update local state with the user's message
+
+    // 1. Add User message
     setChats((prev) => ({
       ...prev,
       [activeSessionId]: [...(prev[activeSessionId] || []), { role: "user", content: userMessage }],
     }));
 
+    // 2. Add an empty placeholder AI message
+    setChats((prev) => ({
+      ...prev,
+      [activeSessionId]: [
+        ...prev[activeSessionId],
+        { role: "ai", content: "", sources: [], calculation: null },
+      ],
+    }));
+
     setIsLoading(true);
 
     try {
-      // Send the request to your FastAPI backend
-      const response = await fetch("http://localhost:8000/api/v1/chat/", {
+      // NOTE: Pointing to the new /stream endpoint
+      const response = await fetch("http://localhost:8000/api/v1/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: activeSessionId, query: userMessage }),
       });
 
-      if (!response.ok) throw new Error("API response was not ok");
-      const data = await response.json();
+      if (!response.ok || !response.body) throw new Error("API stream error");
 
-      setChats((prev) => ({
-        ...prev,
-        [activeSessionId]: [
-          ...prev[activeSessionId],
-          { role: "ai", content: data.answer, sources: data.sources, calculation: data.calculation },
-        ],
-      }));
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Split by the double newline that separates Server-Sent Events
+        const parts = buffer.split("\n\n");
+        // Keep the last incomplete part in the buffer
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          if (part.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(part.substring(6));
+
+              setChats((prev) => {
+                const currentChat = prev[activeSessionId];
+                const lastIdx = currentChat.length - 1;
+                const updatedChat = [...currentChat];
+
+                if (data.type === "metadata") {
+                  updatedChat[lastIdx] = {
+                    ...updatedChat[lastIdx],
+                    calculation: data.calculation,
+                    sources: data.sources,
+                  };
+                } else if (data.type === "chunk") {
+                  updatedChat[lastIdx] = {
+                    ...updatedChat[lastIdx],
+                    content: updatedChat[lastIdx].content + data.content,
+                  };
+                }
+
+                return { ...prev, [activeSessionId]: updatedChat };
+              });
+            } catch (err) {
+              console.error("Error parsing stream chunk:", err, part);
+            }
+          }
+        }
+      }
     } catch (error) {
-      setChats((prev) => ({
-        ...prev,
-        [activeSessionId]: [
-          ...prev[activeSessionId],
-          { role: "ai", content: "Error connecting to TaxMate server." },
-        ],
-      }));
+      setChats((prev) => {
+        const currentChat = prev[activeSessionId];
+        const lastIdx = currentChat.length - 1;
+        const updatedChat = [...currentChat];
+        updatedChat[lastIdx] = { ...updatedChat[lastIdx], content: "Error connecting to stream." };
+        return { ...prev, [activeSessionId]: updatedChat };
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
+    
   const activeMessages = chats[activeSessionId] || [];
 
   return (

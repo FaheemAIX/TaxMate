@@ -205,3 +205,69 @@ def process_query(query: str, session_id: str = "default") -> dict:
             for idx, chunk in enumerate(retrieved_chunks, start=1)
         ],
     }
+
+def stream_query(query: str, session_id: str = "default"):
+    history = get_chat_history(session_id)
+    intent = detect_intent(query, history=history)
+
+    # 1) Exact calculation
+    calculation_result = None
+    missing_info = False
+    if intent.intent_type in ("calculation", "both"):
+        if intent.person_type and intent.annual_income:
+            calculation_result = TAX_FUNCTION_MAP[intent.person_type](intent.annual_income)
+        else:
+            missing_info = True
+
+    # 2) Retrieve context
+    retrieved_chunks = []
+    if intent.intent_type in ("conceptual", "both"):
+        retrieved_chunks = hybrid_search(query, k=5)
+
+    context_blocks = []
+    for idx, chunk in enumerate(retrieved_chunks, start=1):
+        src = chunk.metadata.get("source", "unknown")
+        context_blocks.append(f"[{idx}] Source: {src}\n{chunk.page_content}")
+    context_str = "\n\n---\n\n".join(context_blocks)
+
+    # 3) Build Prompt
+    messages = [("system", FINAL_ANSWER_SYSTEM_PROMPT)]
+    for past_q, past_a in history:
+        messages.append(("human", past_q))
+        messages.append(("ai", past_a))
+
+    current_parts = [f"User question: {query}"]
+    if calculation_result:
+        current_parts.append(f"Calculated result: {calculation_result}")
+    if missing_info:
+        current_parts.append("Note: The user's income or taxpayer type could not be determined.")
+    if context_str:
+        current_parts.append(f"Context from official documents:\n{context_str}")
+
+    messages.append(("human", "\n\n".join(current_parts)))
+
+    # 4) Yield Metadata (Calculation & Sources) FIRST
+    sources_data = [
+        {"index": idx, "content": chunk.page_content[:300], "source": chunk.metadata.get("source", "unknown")}
+        for idx, chunk in enumerate(retrieved_chunks, start=1)
+    ]
+    
+    metadata = {
+        "type": "metadata",
+        "calculation": calculation_result,
+        "sources": sources_data
+    }
+    yield f"data: {json.dumps(metadata)}\n\n"
+
+    # 5) Stream LLM Text Tokens
+    full_answer = ""
+    for chunk in get_llm().stream(messages):
+        if chunk.content:
+            full_answer += chunk.content
+            # Yield each text fragment
+            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk.content})}\n\n"
+
+    # 6) Save final assembled answer to history
+    history.append((query, full_answer))
+    if len(history) > 5:
+        history.pop(0)

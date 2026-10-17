@@ -3,8 +3,9 @@ api/routers/chat.py is like a Resturant's Waiter: It takes the customer's questi
 '''
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.rag_service import process_query
+from app.services.rag_service import process_query, stream_query
 import logging
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -26,4 +27,17 @@ def ask_question(request: ChatRequest):
         )
     except Exception as e:
         logging.error(f"Error processing chat query: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred.")
+
+# Add this new streaming route:
+@router.post("/stream")
+def ask_question_stream(request: ChatRequest):
+    try:
+        # media_type="text/event-stream" tells the browser to keep the connection open
+        return StreamingResponse(
+            stream_query(request.query, request.session_id), 
+            media_type="text/event-stream"
+        )
+    except Exception as e:
+        logging.error(f"Error processing streaming query: {str(e)}")
         raise HTTPException(status_code=500, detail="An error occurred.")
