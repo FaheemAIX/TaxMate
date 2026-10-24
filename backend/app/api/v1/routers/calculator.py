@@ -14,7 +14,6 @@ TAX_FUNCTION_MAP = {
     "property_rental": calculate_property_rental_tax,
 }
 
-
 @router.post("/", response_model=TaxCalculationResponse)
 def calculate_tax(request: TaxCalculationRequest):
     calculation_function = TAX_FUNCTION_MAP[request.person_type]
@@ -25,6 +24,8 @@ def calculate_tax(request: TaxCalculationRequest):
         person_type=request.person_type,
         bracket_lower_bound=result["bracket_lower_bound"],
         bracket_upper_bound=result["bracket_upper_bound"],
+        fixed_tax_amount=result["fixed_tax_amount"],
         marginal_rate=result["marginal_rate"],
-        tax_owed=result["tax_owed"],
+        marginal_tax_amount=result["marginal_tax_amount"],
+        total_tax_payable=result["total_tax_payable"],
     )
